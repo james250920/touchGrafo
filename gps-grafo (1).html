@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Grafo GPS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: una columna estrecha tipo instrumento de campo. Lectura GPS arriba, boton de marcar, grafo, tabla, exportar. */
+:root {
+  --bg: #edf1ef;
+  --panel: #f9fbfa;
+  --ink: #13201e;
+  --muted: #5a6b68;
+  --line: #cdd7d4;
+  --accent: #0b6b5e;
+  --mark: #d9480f;
+  --mark-ink: #ffffff;
+  --ok: #2b8a3e;
+  --warn: #b7791f;
+  --bad: #c92a2a;
+  --font-ui: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-num: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1615;
+    --panel: #162321;
+    --ink: #e4eeeb;
+    --muted: #8fa5a0;
+    --line: #2a3d3a;
+    --accent: #4fd1b8;
+    --mark: #ff8a4c;
+    --mark-ink: #1a0f08;
+    --ok: #69db7c;
+    --warn: #ffd43b;
+    --bad: #ff8787;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1615;
+  --panel: #162321;
+  --ink: #e4eeeb;
+  --muted: #8fa5a0;
+  --line: #2a3d3a;
+  --accent: #4fd1b8;
+  --mark: #ff8a4c;
+  --mark-ink: #1a0f08;
+  --ok: #69db7c;
+  --warn: #ffd43b;
+  --bad: #ff8787;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 17px;
+  line-height: 1.35;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 720px; margin: 0 auto; display: grid; gap: 16px; }
+h1 { font-size: 1.6rem; margin: 0; letter-spacing: 0.01em; text-wrap: balance; }
+h2 { font-size: 0.8rem; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); font-weight: 600; }
+.top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 0.95rem; color: var(--muted); min-width: 0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.live { background: var(--ok); }
+.dot.wait { background: var(--warn); }
+.dot.err { background: var(--bad); }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; min-width: 0; }
+
+.readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px 16px; }
+.cell { min-width: 0; }
+.cell .k { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.cell .v { font-family: var(--font-num); font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cell .u { font-size: 0.85rem; color: var(--muted); font-weight: 400; }
+
+.markrow { display: grid; gap: 10px; }
+.field { display: grid; gap: 4px; }
+.field label { font-size: 0.85rem; color: var(--muted); }
+input[type="text"] {
+  font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; width: 100%;
+}
+.check { display: flex; gap: 8px; align-items: center; font-size: 0.95rem; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+select {
+  font: inherit; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; width: 100%; min-height: 44px;
+}
+button {
+  font: inherit; font-weight: 600; cursor: pointer; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  padding: 10px 14px; min-height: 44px;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary {
+  background: var(--mark); color: var(--mark-ink); border-color: var(--mark);
+  font-size: 1.2rem; min-height: 56px; letter-spacing: 0.02em;
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--mark); }
+button.danger { color: var(--bad); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+.graphwrap { overflow-x: auto; }
+svg.graph { display: block; width: 100%; height: auto; min-width: 280px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }
+.graph .edge { stroke: var(--accent); stroke-width: 2; }
+.graph .node { fill: var(--panel); stroke: var(--ink); stroke-width: 2; cursor: pointer; }
+.graph .node.sel { fill: var(--mark); stroke: var(--mark); }
+.graph .node.last { stroke: var(--mark); stroke-width: 3; }
+.graph .nid { font-family: var(--font-num); font-size: 11px; fill: var(--ink); pointer-events: none; text-anchor: middle; dominant-baseline: central; font-weight: 600; }
+.graph .nid.sel { fill: var(--mark-ink); }
+.graph .elab { font-family: var(--font-num); font-size: 10px; fill: var(--muted); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.graph .north { font-family: var(--font-num); font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.graph .north-line { stroke: var(--muted); stroke-width: 1.5; }
+.hint { font-size: 0.88rem; color: var(--muted); margin: 8px 0 0; }
+.empty { color: var(--muted); padding: 24px 8px; text-align: center; }
+
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-family: var(--font-num); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-family: var(--font-ui); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+td button { min-height: 32px; padding: 2px 10px; font-size: 0.8rem; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.counts { font-family: var(--font-num); font-size: 0.85rem; color: var(--muted); }
+.note { font-size: 0.85rem; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  button { transition: filter 0.12s, border-color 0.12s; }
+}
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <h1>Grafo GPS</h1>
+    <div class="status" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="statusText">Iniciando GPS…</span></div>
+  </div>
+
+  <section class="panel" aria-label="Lectura del GPS">
+    <h2>Posición actual</h2>
+    <div class="readout">
+      <div class="cell"><div class="k">Latitud</div><div class="v" id="lat">—</div></div>
+      <div class="cell"><div class="k">Longitud</div><div class="v" id="lon">—</div></div>
+      <div class="cell"><div class="k">Altitud</div><div class="v"><span id="alt">—</span> <span class="u">m</span></div></div>
+      <div class="cell"><div class="k">Precisión</div><div class="v"><span id="acc">—</span> <span class="u">m</span></div></div>
+    </div>
+  </section>
+
+  <section class="panel markrow" aria-label="Marcar punto">
+    <div class="field">
+      <label for="label">Nombre del punto (opcional)</label>
+      <input type="text" id="label" autocomplete="off" placeholder="Ej. Esquina plaza">
+    </div>
+    <div class="field">
+      <label for="secs">Promediar lecturas durante</label>
+      <select id="secs">
+        <option value="0">Instantáneo (sin promedio)</option>
+        <option value="5">5 s</option>
+        <option value="10">10 s</option>
+        <option value="15" selected>15 s</option>
+        <option value="30">30 s</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" id="autolink" checked> Unir con el punto anterior</label>
+    <button class="primary" id="mark" disabled>Marcar punto</button>
+    <p class="note" id="sampleInfo">Quédate quieto mientras se promedia. Se descarta el 20 % de lecturas con peor precisión.</p>
+  </section>
+
+  <section class="panel" aria-label="Grafo">
+    <h2>Grafo</h2>
+    <div class="graphwrap" id="graphwrap"></div>
+    <p class="hint">Toca un nodo y luego otro para crear o quitar una arista entre ellos.</p>
+  </section>
+
+  <section class="panel" aria-label="Puntos marcados">
+    <h2>Nodos</h2>
+    <div class="tablewrap" id="nodes"></div>
+  </section>
+
+  <section class="panel" aria-label="Exportar">
+    <h2>Exportar</h2>
+    <p class="counts" id="counts">0 nodos · 0 aristas</p>
+    <div class="actions">
+      <button id="exJson">JSON del grafo</button>
+      <button id="exNodes">CSV nodos</button>
+      <button id="exEdges">CSV aristas</button>
+      <button id="copyJson">Copiar JSON</button>
+      <button class="danger" id="clear">Borrar todo</button>
+    </div>
+    <p class="note" id="msg"></p>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "gps-grafo-v1";
+  var state = { points: [], edges: [], next: 1 };
+  var cur = null;          // ultima posicion GPS
+  var selected = null;     // nodo seleccionado para unir
+  var clearArmed = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s && Array.isArray(s.points) && Array.isArray(s.edges)) state = s;
+      }
+    } catch (e) {}
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+  }
+
+  function fmt(n, d) { return (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(d); }
+
+  function haversine(a, b) {
+    var R = 6371008.8, rad = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  function pointById(id) {
+    for (var i = 0; i < state.points.length; i++) if (state.points[i].id === id) return state.points[i];
+    return null;
+  }
+  function edgeIndex(a, b) {
+    for (var i = 0; i < state.edges.length; i++) {
+      var e = state.edges[i];
+      if ((e.from === a && e.to === b) || (e.from === b && e.to === a)) return i;
+    }
+    return -1;
+  }
+  function addEdge(a, b) {
+    if (a === b || edgeIndex(a, b) !== -1) return;
+    var pa = pointById(a), pb = pointById(b);
+    if (!pa || !pb) return;
+    state.edges.push({ from: a, to: b, distance_m: Math.round(haversine(pa, pb) * 100) / 100 });
+  }
+
+  /* ---------- GPS ---------- */
+  function setStatus(kind, text) {
+    $("dot").className = "dot " + kind;
+    $("statusText").textContent = text;
+  }
+
+  function onPos(p) {
+    var c = p.coords;
+    cur = { lat: c.latitude, lon: c.longitude, alt: (c.altitude === null || c.altitude === undefined) ? null : c.altitude, acc: c.accuracy, t: p.timestamp };
+    $("lat").textContent = fmt(cur.lat, 6);
+    $("lon").textContent = fmt(cur.lon, 6);
+    $("alt").textContent = fmt(cur.alt, 1);
+    $("acc").textContent = fmt(cur.acc, 1);
+    if (sampling) sampling.readings.push(cur);
+    else $("mark").disabled = false;
+    setStatus("live", "GPS activo");
+  }
+  function onErr(e) {
+    var m = "No se pudo leer el GPS.";
+    if (e.code === 1) m = "Permiso de ubicación denegado. Actívalo en el navegador y recarga.";
+    else if (e.code === 2) m = "Ubicación no disponible. Prueba al aire libre.";
+    else if (e.code === 3) m = "El GPS tarda en responder…";
+    setStatus(e.code === 3 ? "wait" : "err", m);
+  }
+  function startGps() {
+    if (!("geolocation" in navigator)) { setStatus("err", "Este navegador no tiene geolocalización."); return; }
+    if (!window.isSecureContext && location.protocol !== "file:") {
+      setStatus("err", "El GPS requiere HTTPS. Abre la página desde una dirección https://.");
+    } else {
+      setStatus("wait", "Buscando señal GPS…");
+    }
+    navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+  }
+
+  /* ---------- marcar ---------- */
+  var sampling = null;
+
+  // Promedio ponderado por 1/precision^2, descartando el 20 % peor.
+  function average(rs) {
+    var sorted = rs.slice().sort(function (a, b) { return a.acc - b.acc; });
+    var keep = sorted.slice(0, Math.max(1, Math.ceil(sorted.length * 0.8)));
+    var sw = 0, la = 0, lo = 0, sa = 0, swa = 0, accSum = 0;
+    keep.forEach(function (r) {
+      var w = 1 / Math.max(r.acc * r.acc, 1);
+      sw += w; la += r.lat * w; lo += r.lon * w; accSum += r.acc;
+      if (r.alt !== null) { sa += r.alt * w; swa += w; }
+    });
+    return { lat: la / sw, lon: lo / sw, alt: swa ? sa / swa : null, acc: accSum / keep.length, n: keep.length, total: rs.length };
+  }
+
+  function markPoint() {
+    if (!cur || sampling) return;
+    var secs = parseInt($("secs").value, 10) || 0;
+    if (secs === 0) { finishPoint([cur]); return; }
+    sampling = { readings: [cur], end: Date.now() + secs * 1000, timer: null };
+    $("mark").disabled = true;
+    tick();
+    sampling.timer = setInterval(tick, 250);
+  }
+
+  function tick() {
+    var left = Math.max(0, sampling.end - Date.now());
+    $("mark").textContent = "Promediando… " + Math.ceil(left / 1000) + " s";
+    $("sampleInfo").textContent = sampling.readings.length + " lecturas recibidas. Quédate quieto.";
+    if (left <= 0) {
+      clearInterval(sampling.timer);
+      var rs = sampling.readings;
+      sampling = null;
+      $("mark").textContent = "Marcar punto";
+      $("mark").disabled = !cur;
+      finishPoint(rs);
+    }
+  }
+
+  function finishPoint(rs) {
+    var a = average(rs);
+    var prev = state.points.length ? state.points[state.points.length - 1] : null;
+    var id = state.next++;
+    var label = $("label").value.trim();
+    var pt = {
+      id: id,
+      label: label || ("P" + id),
+      lat: a.lat, lon: a.lon, alt: a.alt,
+      accuracy: Math.round(a.acc * 10) / 10,
+      samples: a.n,
+      time: new Date().toISOString()
+    };
+    var info = "P" + id + " guardado con " + a.n + " de " + a.total + " lecturas, precisión media " + fmt(a.acc, 1) + " m.";
+    if (a.total < 3 && rs.length > 1) info += " Pocas lecturas: espera más tiempo o mejora la señal.";
+    $("sampleInfo").textContent = info;
+    state.points.push(pt);
+    if (prev && $("autolink").checked) addEdge(prev.id, id);
+    $("label").value = "";
+    selected = null;
+    save();
+    render();
+  }
+
+  function removePoint(id) {
+    state.points = state.points.filter(function (p) { return p.id !== id; });
+    state.edges = state.edges.filter(function (e) { return e.from !== id && e.to !== id; });
+    if (selected === id) selected = null;
+    save();
+    render();
+  }
+
+  /* ---------- render ---------- */
+  var NS = "http://www.w3.org/2000/svg";
+  function svgEl(name, attrs, text) {
+    var el = document.createElementNS(NS, name);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  function renderGraph() {
+    var wrap = $("graphwrap");
+    wrap.textContent = "";
+    var pts = state.points;
+    if (!pts.length) {
+      var d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = "Aún no hay puntos. Pulsa «Marcar punto» para crear el primer nodo.";
+      wrap.appendChild(d);
+      return;
+    }
+    var W = 640, H = 400, PAD = 40;
+    var lat0 = pts.reduce(function (s, p) { return s + p.lat; }, 0) / pts.length;
+    var lon0 = pts.reduce(function (s, p) { return s + p.lon; }, 0) / pts.length;
+    var kx = Math.cos(lat0 * Math.PI / 180) * 111320, ky = 110540;
+    var xy = pts.map(function (p) { return { x: (p.lon - lon0) * kx, y: (p.lat - lat0) * ky }; });
+    var minX = Math.min.apply(null, xy.map(function (q) { return q.x; }));
+    var maxX = Math.max.apply(null, xy.map(function (q) { return q.x; }));
+    var minY = Math.min.apply(null, xy.map(function (q) { return q.y; }));
+    var maxY = Math.max.apply(null, xy.map(function (q) { return q.y; }));
+    var spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+    var sc = Math.min((W - 2 * PAD) / spanX, (H - 2 * PAD) / spanY);
+    var offX = (W - spanX * sc) / 2, offY = (H - spanY * sc) / 2;
+    var pos = {};
+    pts.forEach(function (p, i) {
+      pos[p.id] = { x: offX + (xy[i].x - minX) * sc, y: H - (offY + (xy[i].y - minY) * sc) };
+    });
+
+    var svg = svgEl("svg", { "class": "graph", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Grafo de puntos marcados" });
+
+    state.edges.forEach(function (e) {
+      var a = pos[e.from], b = pos[e.to];
+      if (!a || !b) return;
+      svg.appendChild(svgEl("line", { "class": "edge", x1: a.x, y1: a.y, x2: b.x, y2: b.y }));
+      svg.appendChild(svgEl("text", { "class": "elab", x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 6 }, fmt(e.distance_m, 1) + " m"));
+    });
+
+    var last = pts[pts.length - 1].id;
+    pts.forEach(function (p) {
+      var q = pos[p.id];
+      var isSel = selected === p.id;
+      var g = svgEl("g", { tabindex: "0", role: "button", "aria-label": "Nodo " + p.id + " " + p.label });
+      g.appendChild(svgEl("circle", { "class": "node" + (isSel ? " sel" : "") + (p.id === last ? " last" : ""), cx: q.x, cy: q.y, r: 14 }));
+      g.appendChild(svgEl("text", { "class": "nid" + (isSel ? " sel" : ""), x: q.x, y: q.y }, String(p.id)));
+      var pick = function () { pickNode(p.id); };
+      g.addEventListener("click", pick);
+      g.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(); } });
+      svg.appendChild(g);
+    });
+
+    // norte
+    svg.appendChild(svgEl("line", { "class": "north-line", x1: W - 28, y1: 44, x2: W - 28, y2: 18 }));
+    svg.appendChild(svgEl("text", { "class": "north", x: W - 28, y: 58 }, "N"));
+
+    wrap.appendChild(svg);
+  }
+
+  function pickNode(id) {
+    if (selected === null) { selected = id; }
+    else if (selected === id) { selected = null; }
+    else {
+      var i = edgeIndex(selected, id);
+      if (i === -1) addEdge(selected, id); else state.edges.splice(i, 1);
+      selected = null;
+      save();
+    }
+    render();
+  }
+
+  function cellText(tr, text, tag) {
+    var c = document.createElement(tag || "td");
+    c.textContent = text;
+    tr.appendChild(c);
+    return c;
+  }
+
+  function renderTable() {
+    var box = $("nodes");
+    box.textContent = "";
+    if (!state.points.length) {
+      var d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = "Sin nodos todavía.";
+      box.appendChild(d);
+      return;
+    }
+    var t = document.createElement("table");
+    var thead = document.createElement("thead");
+    var hr = document.createElement("tr");
+    ["ID", "Nombre", "Latitud", "Longitud", "Alt (m)", "Prec (m)", ""].forEach(function (h) { cellText(hr, h, "th"); });
+    thead.appendChild(hr);
+    t.appendChild(thead);
+    var tb = document.createElement("tbody");
+    state.points.forEach(function (p) {
+      var tr = document.createElement("tr");
+      cellText(tr, String(p.id));
+      cellText(tr, p.label);
+      cellText(tr, fmt(p.lat, 6));
+      cellText(tr, fmt(p.lon, 6));
+      cellText(tr, fmt(p.alt, 1));
+      cellText(tr, fmt(p.accuracy, 1));
+      var td = document.createElement("td");
+      var b = document.createElement("button");
+      b.textContent = "Quitar";
+      b.addEventListener("click", function () { removePoint(p.id); });
+      td.appendChild(b);
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    box.appendChild(t);
+  }
+
+  function render() {
+    renderGraph();
+    renderTable();
+    $("counts").textContent = state.points.length + " nodos · " + state.edges.length + " aristas";
+    var has = state.points.length > 0;
+    ["exJson", "exNodes", "exEdges", "copyJson", "clear"].forEach(function (id) { $(id).disabled = !has; });
+    if (!clearArmed) $("clear").textContent = "Borrar todo";
+  }
+
+  /* ---------- exportar ---------- */
+  function graphJson() {
+    return JSON.stringify({
+      generated: new Date().toISOString(),
+      nodes: state.points.map(function (p) {
+        return { id: p.id, label: p.label, lat: p.lat, lon: p.lon, alt: p.alt, accuracy: p.accuracy, samples: p.samples || 1, time: p.time };
+      }),
+      edges: state.edges.map(function (e) { return { from: e.from, to: e.to, distance_m: e.distance_m }; })
+    }, null, 2);
+  }
+  function csvCell(v) {
+    if (v === null || v === undefined) return "";
+    var s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function csv(rows) { return rows.map(function (r) { return r.map(csvCell).join(","); }).join("\n") + "\n"; }
+  function nodesCsv() {
+    return csv([["id", "label", "lat", "lon", "alt", "accuracy", "samples", "time"]].concat(
+      state.points.map(function (p) { return [p.id, p.label, p.lat, p.lon, p.alt, p.accuracy, p.samples || 1, p.time]; })));
+  }
+  function edgesCsv() {
+    return csv([["from", "to", "distance_m"]].concat(
+      state.edges.map(function (e) { return [e.from, e.to, e.distance_m]; })));
+  }
+  function download(name, text, type) {
+    var url = URL.createObjectURL(new Blob([text], { type: type }));
+    var a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    say("Archivo " + name + " generado.");
+  }
+  function say(t) { $("msg").textContent = t; }
+
+  function copyJson() {
+    var text = graphJson();
+    var done = function () { say("JSON copiado al portapapeles."); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { say("No se pudo copiar. Usa «JSON del grafo»."); });
+    } else {
+      say("Este navegador no permite copiar. Usa «JSON del grafo».");
+    }
+  }
+
+  function clearAll() {
+    if (!clearArmed) {
+      clearArmed = true;
+      $("clear").textContent = "Pulsa otra vez para confirmar";
+      setTimeout(function () { clearArmed = false; render(); }, 4000);
+      return;
+    }
+    clearArmed = false;
+    state = { points: [], edges: [], next: 1 };
+    selected = null;
+    save();
+    render();
+    say("Grafo borrado.");
+  }
+
+  $("mark").addEventListener("click", markPoint);
+  $("exJson").addEventListener("click", function () { download("grafo.json", graphJson(), "application/json"); });
+  $("exNodes").addEventListener("click", function () { download("nodos.csv", nodesCsv(), "text/csv"); });
+  $("exEdges").addEventListener("click", function () { download("aristas.csv", edgesCsv(), "text/csv"); });
+  $("copyJson").addEventListener("click", copyJson);
+  $("clear").addEventListener("click", clearAll);
+
+  load();
+  render();
+  startGps();
+})();
+</script>
+</body>
+</html>
